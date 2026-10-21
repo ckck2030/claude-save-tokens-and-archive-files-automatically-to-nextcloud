@@ -1,0 +1,11 @@
+{
+  "host": "https://nextcloud.example.com",
+  "user": "claude",
+  "password": "YOUR-NEXTCLOUD-APP-PASSWORD",
+  "root_folder": "claude",
+  "timezone": "UTC",
+  "outputs_dir": "/mnt/user-data/outputs",
+  "scan_root": "/home/claude",
+  "viewer_url": "https://www.example.com/archive/refresh.php",
+  "viewer_token": "THE-REFRESH-TOKEN-SHOWN-BY-viewer/setup.php"
+}
