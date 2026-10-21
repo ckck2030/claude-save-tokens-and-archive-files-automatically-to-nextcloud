@@ -1,0 +1,10 @@
+# private settings - never commit these
+plugin/config.json
+viewer/config.php
+viewer/data/*
+!viewer/data/.htaccess
+!viewer/data/.gitkeep
+*.plugin
+__pycache__/
+*.pyc
+.claude-archive/
