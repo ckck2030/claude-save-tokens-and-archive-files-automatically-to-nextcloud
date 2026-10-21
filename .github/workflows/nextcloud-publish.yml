@@ -1,0 +1,79 @@
+name: Publish release from Nextcloud
+
+# Claude threads can't push to this repo. Instead they drop the full repo tree as
+# a zip in Nextcloud: claude/github-inbox/claude-archive/release.zip
+# (optional: release.txt, first line = commit message, line "tag: v1.2.3" = make a release).
+# This workflow checks every 30 minutes (or right away via "Run workflow"),
+# refuses the zip if it contains any word from the PRIVATE_WORDS secret,
+# replaces the repo files with the zip contents (.github is never touched),
+# commits, pushes to main and writes a report back to Nextcloud.
+#
+# Secrets: NEXTCLOUD_URL (WebDAV folder URL of claude/github-inbox/claude-archive),
+#          NEXTCLOUD_PASSWORD (Nextcloud user "claude"), PRIVATE_WORDS (one word per line).
+
+on:
+  schedule:
+    - cron: '17,47 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nextcloud-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NC_URL: ${{ secrets.NEXTCLOUD_URL }}
+      NC_USER: claude
+      NC_PASS: ${{ secrets.NEXTCLOUD_PASSWORD }}
+      PRIVATE_WORDS: ${{ secrets.PRIVATE_WORDS }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Pick up, check, publish, report
+        shell: bash
+        run: |
+          set -u
+          nc() { curl -sS --fail-with-body -u "$NC_USER:$NC_PASS" "$@"; }
+          stamp=$(date -u +%Y%m%d-%H%M%S)
+          code=$(curl -sS -o /tmp/release.zip -w '%{http_code}' -u "$NC_USER:$NC_PASS" "$NC_URL/release.zip")
+          [ "$code" = "200" ] || { echo "Nothing waiting ($code)"; exit 0; }
+          curl -sS -o /tmp/release.txt -u "$NC_USER:$NC_PASS" -f "$NC_URL/release.txt" || : > /tmp/release.txt
+          # move out of the inbox first so it is never processed twice
+          nc -X MOVE -H "Destination: $NC_URL/processed/release-$stamp.zip" "$NC_URL/release.zip" || true
+          nc -X DELETE "$NC_URL/release.txt" > /dev/null 2>&1 || true
+          report=/tmp/report.txt; : > "$report"
+          rm -rf /tmp/tree && mkdir /tmp/tree && unzip -q /tmp/release.zip -d /tmp/tree
+          # a zip with one top folder: use that folder as the tree
+          if [ "$(ls -A /tmp/tree | wc -l)" = "1" ] && [ -d "/tmp/tree/$(ls -A /tmp/tree)" ]; then src="/tmp/tree/$(ls -A /tmp/tree)"; else src=/tmp/tree; fi
+          # privacy check: refuse if any private word appears in names or contents
+          bad=0
+          while IFS= read -r w; do
+            w=$(echo "$w" | tr -d '\r'); [ -n "$w" ] || continue
+            if grep -rIil -- "$w" "$src" > /tmp/hits 2>/dev/null || (cd "$src" && find . | grep -i -- "$w" > /tmp/hits); then
+              bad=1; echo "REFUSED: a private word was found in $(wc -l < /tmp/hits) file(s):" >> "$report"; sed 's/^/  /' /tmp/hits >> "$report"
+            fi
+          done <<< "$PRIVATE_WORDS"
+          if [ "$bad" = "0" ]; then
+            msg=$(grep -v '^tag:' /tmp/release.txt | head -1); [ -n "$msg" ] || msg="Release from Nextcloud $stamp"
+            tag=$(grep '^tag:' /tmp/release.txt | head -1 | sed 's/^tag:[[:space:]]*//')
+            rsync -a --delete --exclude .git --exclude .github "$src"/ ./
+            git config user.name "github-actions[bot]"; git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            if git diff --cached --quiet; then echo "No changes." >> "$report"
+            else git commit -q -m "$msg" && git push -q origin HEAD:main && echo "PUBLISHED: $msg ($(git rev-parse --short HEAD))" >> "$report"; fi
+            if [ -n "$tag" ]; then
+              gh release create "$tag" --target main --title "$tag" --notes "$msg" >> "$report" 2>&1 && echo "RELEASE: $tag" >> "$report"
+            fi
+          fi
+          cat "$report"
+          nc -T "$report" "$NC_URL/results/report-$stamp.txt" > /dev/null
+          nc -T "$report" "$NC_URL/results/latest.txt" > /dev/null
+          [ "$bad" = "0" ]
