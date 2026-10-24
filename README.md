@@ -60,7 +60,7 @@ Thread folder names: `<project>-<mm-dd-yyyy>-ver<X.Y.Z>-<what-was-done>`, e.g. `
 
 All screenshots show made-up example data.
 
-The Journal tab. Each day lists the time per project (A) and per business (C). Open a project to see its buttons and files; **handoff** copies the text to paste into a new thread:
+The Journal tab. Each day lists the time per project (A) and per business (C). A thread that is part of a chain shows its name, like `garden-planner-v3`. Open a project to see its buttons and files; **handoff** copies the text to paste into a new thread:
 
 ![Journal tab with one project opened](docs/viewer-journal.png)
 
@@ -68,9 +68,13 @@ Click a file and it opens in a pane on the right, with download and open-in-new-
 
 ![A file opened in the right pane](docs/viewer-file-pane.png)
 
-The Projects tab groups every project folder by business, with total time, last worked date, and the newest version of each file:
+The Projects tab groups every project folder by business, with total time, last worked date, and the newest version of each file. The threads of one chain (`garden-planner-v1`, `-v2`, `-v3`) stay together in one group:
 
-![Projects tab with one project opened](docs/viewer-projects.png)
+![Projects tab with a thread chain opened](docs/viewer-projects.png)
+
+The Tokens tab shows the tokens used in the last 7 days, the last 30 days, or all time. Each project and thread has a bar split into starting context (grey), the archive plugin (orange), and your work (blue):
+
+![Tokens tab with one project opened](docs/viewer-tokens.png)
 
 ## Requirements
 
