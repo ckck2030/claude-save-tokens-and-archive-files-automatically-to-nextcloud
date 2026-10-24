@@ -12,13 +12,18 @@ function db(): PDO {
     $pdo = new PDO('sqlite:' . $CFG['db']);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->exec("
-        CREATE TABLE IF NOT EXISTS projects (folder TEXT PRIMARY KEY, name TEXT, business TEXT, updated INTEGER, secs INTEGER DEFAULT 0, topic TEXT);
-        CREATE TABLE IF NOT EXISTS threads  (sid TEXT PRIMARY KEY, url TEXT, topic TEXT, folder TEXT, secs INTEGER, first_day TEXT, last_day TEXT);
+        CREATE TABLE IF NOT EXISTS projects (folder TEXT PRIMARY KEY, name TEXT, business TEXT, updated INTEGER, secs INTEGER DEFAULT 0, topic TEXT, chain TEXT, chain_n INTEGER);
+        CREATE TABLE IF NOT EXISTS threads  (sid TEXT PRIMARY KEY, url TEXT, topic TEXT, folder TEXT, secs INTEGER, first_day TEXT, last_day TEXT, chain TEXT, chain_n INTEGER);
         CREATE TABLE IF NOT EXISTS entries  (id INTEGER PRIMARY KEY, day TEXT, sid TEXT, clock TEXT, spent INTEGER, text TEXT, links TEXT, sort INTEGER);
         CREATE TABLE IF NOT EXISTS notes    (id INTEGER PRIMARY KEY, day TEXT, text TEXT);
         CREATE TABLE IF NOT EXISTS files    (path TEXT PRIMARY KEY, folder TEXT, name TEXT, size INTEGER, modified INTEGER, older INTEGER, kind TEXT, product TEXT, version TEXT, date TEXT);
         CREATE TABLE IF NOT EXISTS meta     (key TEXT PRIMARY KEY, value TEXT);
+        CREATE TABLE IF NOT EXISTS tokens   (day TEXT, sid TEXT, project TEXT, total INTEGER, base INTEGER, archive INTEGER, calls INTEGER, PRIMARY KEY (day, sid));
     ");
+    // thread chains (viewer 1.14.0): add the columns to a database made by an older version
+    foreach (['projects', 'threads'] as $t) foreach (['chain TEXT', 'chain_n INTEGER'] as $col) {
+        try { $pdo->exec("ALTER TABLE $t ADD COLUMN $col"); } catch (PDOException $e) { /* already there */ }
+    }
     return $pdo;
 }
 

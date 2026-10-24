@@ -1,6 +1,6 @@
 {
   "name": "claude-archive",
-  "version": "2.0.0",
-  "description": "Saves every Claude thread's deliverables to your own Nextcloud, writes your work journal, keeps a handoff doc per thread so you can continue in a fresh thread with one paste, and updates the Claude Archive viewer live.",
+  "version": "2.3.2",
+  "description": "Saves each Claude thread's deliverables to your Nextcloud, writes your work journal and keeps handoff docs so you can continue in a new thread (continue <chain>-vN).",
   "license": "MIT"
 }

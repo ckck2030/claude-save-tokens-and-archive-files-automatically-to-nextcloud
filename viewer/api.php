@@ -27,4 +27,5 @@ echo json_encode([
     'entries'  => $entries,
     'notes'    => $all("SELECT * FROM notes ORDER BY day DESC, id"),
     'files'    => $all("SELECT * FROM files ORDER BY older, modified DESC"),
+    'tokens'   => $all("SELECT * FROM tokens ORDER BY day DESC"),
 ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);

@@ -13,7 +13,9 @@ Nextcloud is only the file store. You never have to open it.
 
 ## What it does
 
-- **Hands off to a fresh thread in one paste.** Once a thread has done some work, the plugin keeps a handoff doc with the goal, decisions, current state, and next steps, and updates it as you work. Press **handoff** on the archive page (it copies `continue <folder name>`), paste that as the only text in a new thread, and Claude continues the work there.
+- **Hands off to a fresh thread in one paste.** Send `handoff` in a thread and Claude writes a handoff doc with the goal, decisions, current state, and next steps (it also does this on its own once a thread passes 150K tokens). Threads form numbered chains: paste `continue recipe-app-v3` as the only text in a new thread, and Claude loads the doc and continues the work there. The **handoff** button on the archive page copies that line for you.
+- **Shows the thread size after every reply.** A one-line note such as `112K continue recipe-app-v3` tells you how big the thread is and what to send in a new thread. A thread with nothing saved yet shows `112K send handoff` instead: send `handoff` to give it a name. The note costs no extra Claude call.
+- **Shows where your tokens go.** The Tokens tab lists the tokens used per day, per project and per thread, how much of that is the starting context, and an estimate of the share used by the archive plugin itself. The plugin reads these numbers from the thread's transcript, with no extra Claude call.
 - **Writes your work journal automatically.** The journal shows, for each day, the time spent per project and per business, when each thread started and ended, your own notes, and each finished file. You can look up what you did on any day without taking notes.
 - **Adds your own journal entries.** Send `journal: called the print shop about labels` as its own message in any thread, and the plugin adds that line to today's journal with the current time.
 - **Saves your deliverables.** At the end of each Claude reply, the plugin uploads new files from Claude's outputs folder to the thread's Nextcloud folder. If Claude changed other work, the plugin tells Claude to copy it to the outputs folder first. The plugin skips files already on the server.
@@ -28,7 +30,7 @@ Nextcloud is only the file store. You never have to open it.
 
 The usual fix for a long, expensive thread is to stop, write up notes or a CLAUDE.md file, and start a new thread with that context. Writing those notes takes effort, and you can easily leave something out.
 
-Once a thread has done some work, the plugin refreshes its handoff doc as you go, so the doc is ready when you want to switch. To switch threads, press **handoff** on the archive page and paste the copied text as the only message in a new thread. Claude in the new thread loads the doc, uses the same Nextcloud folder, and continues the work.
+The size note after each reply shows when a thread is getting expensive. To switch threads, send `handoff`, then paste the `continue <chain>-v<N>` line as the only message in a new thread. Claude in the new thread loads the doc, uses the same Nextcloud folder, and continues the work. The Tokens tab shows which projects and threads used the most tokens.
 
 ### Your journal writes itself
 
@@ -130,14 +132,14 @@ Finish with a short summary: the address of my archive page, where my files are 
 
 ## How live updates work
 
-1. Claude finishes a reply. The plugin's Stop hook has Claude upload new files, record the journal and update the handoff doc.
+1. Claude finishes a reply. The plugin's Stop hook starts a background job that uploads new files, records the journal and the token counts. This needs no extra Claude call.
 2. After each of those, the plugin sends one small POST to `refresh.php` on your viewer with the `viewer_token`. The viewer answers at once and rebuilds its database in the background (one rebuild at a time; a second request waits and then rebuilds again, so nothing is missed).
 3. The archive page, while its tab is visible, reads a tiny timestamp file every 20 seconds and reloads the data only when it changed. Open sections, scroll position and the file pane stay as they were. The page never talks to Nextcloud itself; only `import.php` and `file.php` do.
 4. The hourly cron job rebuilds the database too, in case a POST was lost.
 
 ## Good to know
 
-- The archive step runs when Claude finishes a reply and uses a few extra tool calls.
+- The archive step runs in the background when Claude finishes a reply and adds no Claude calls. Handoff docs are written by Claude, so they cost one short step when you ask for one.
 - **claude thread** buttons appear only for cloud threads, such as Claude Cowork or Claude Code on the web. In a local Claude Code terminal, the thread's address is not available, so the plugin leaves those out.
 - If you change the app password, user, or host, update `config.json` and reinstall the plugin, and run `php setup.php` again for the viewer.
 - Inside Claude, the plugin is named `claude-archive`.

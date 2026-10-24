@@ -39,16 +39,31 @@ function classify_link(string $label, string $url): array {
 
 $db = db();
 $db->beginTransaction();
-foreach (['projects', 'threads', 'entries', 'notes', 'files', 'meta'] as $t) $db->exec("DELETE FROM $t");
+foreach (['projects', 'threads', 'entries', 'notes', 'files', 'meta', 'tokens'] as $t) $db->exec("DELETE FROM $t");
 
 // ---- journal days ----
 [$code, $body] = dav('GET', '.state/journal-days.json');
 if ($code !== 200) die("journal-days.json: HTTP $code\n");
 $jd = json_decode($body, true);
 
-$insThread = $db->prepare("INSERT OR REPLACE INTO threads VALUES (?,?,?,?,?,?,?)");
+// ---- thread chains: .state/chains.json = {"<chain>": [{"n": 1, "sid": ..., "folder": ..., "thread": ...}, ...]} ----
+$chainOf = [];        // session id (or the thread url's last part) -> [chain, n]
+$chainOfFolder = [];  // folder -> [chain, n] (its highest-numbered link)
+[$code, $body] = dav('GET', '.state/chains.json');
+$chains = $code === 200 ? (json_decode($body, true) ?: []) : [];
+foreach ($chains as $chain => $links) foreach ((array)$links as $l) {
+    // a pending link (plugin 2.2.0 named handoff, sid "") has no thread yet: it labels nothing until a thread claims it
+    if (!is_array($l) || !empty($l['pending'])) continue;
+    $n = (int)($l['n'] ?? 0);
+    if (!empty($l['sid'])) $chainOf[$l['sid']] = [$chain, $n];
+    if (!empty($l['thread'])) $chainOf[preg_replace('#.*/#', '', $l['thread'])] = [$chain, $n];
+    if (!empty($l['folder']) && $n > ($chainOfFolder[$l['folder']][1] ?? 0)) $chainOfFolder[$l['folder']] = [$chain, $n];
+}
+
+$insThread = $db->prepare("INSERT OR REPLACE INTO threads (sid,url,topic,folder,secs,first_day,last_day,chain,chain_n) VALUES (?,?,?,?,?,?,?,?,?)");
 $insEntry  = $db->prepare("INSERT INTO entries (day,sid,clock,spent,text,links,sort) VALUES (?,?,?,?,?,?,?)");
 $insNote   = $db->prepare("INSERT INTO notes (day,text) VALUES (?,?)");
+$insTok    = $db->prepare("INSERT OR REPLACE INTO tokens VALUES (?,?,?,?,?,?,?)");
 $threads = [];
 foreach ($jd as $day => $rec) {
     if ($day === '_notes') {
@@ -61,12 +76,14 @@ foreach ($jd as $day => $rec) {
         if (!is_array($e) || empty($e['topic'])) continue;
         $sid = preg_replace('#.*/#', '', $url);
         $t = &$threads[$sid];
-        if (!$t) $t = ['url' => $url, 'topic' => $e['topic'], 'folder' => $e['folder'] ?? '', 'secs' => 0, 'first' => $day, 'last' => $day];
+        if (!$t) $t = ['url' => $url, 'topic' => $e['topic'], 'folder' => $e['folder'] ?? '', 'secs' => 0, 'first' => $day, 'last' => $day, 'chain' => '', 'chain_n' => 0];
         $t['secs'] += (int)$e['secs'];
+        if (!empty($e['chain']) && preg_match('/^(.+)-v(\d+)$/', $e['chain'], $cm)) { $t['chain'] = $cm[1]; $t['chain_n'] = (int)$cm[2]; }
         if (!empty($e['folder'])) $t['folder'] = $e['folder'];
         $t['topic'] = $e['topic'];
         $t['first'] = min($t['first'], $day); $t['last'] = max($t['last'], $day);
         unset($t);
+        if (!empty($e['tok'])) { $k = $e['tok']; $insTok->execute([$day, $sid, $k['p'] ?? '', (int)$k['t'], (int)$k['b'], (int)$k['a'], (int)$k['n']]); }
         foreach ($e['lines'] ?? [] as $i => $line) {
             if (!preg_match('/^- (\d{1,2}:\d{2}(?:am|pm)) (?:\((\d+):(\d{2})(?: spent)?\) )?(.*?)(?: - (\[.*\]\(.*\)))?$/', $line, $m)) continue;
             $spent = $m[2] !== '' ? (int)$m[2] * 3600 + (int)$m[3] * 60 : 0;
@@ -86,7 +103,11 @@ foreach ($threads as $sid => &$t) if ($t['folder'] === '') {
         foreach (json_decode($row['links'], true) as $l) if ($l['folder'] && in_array($l['kind'], ['files', 'handoff'])) { $t['folder'] = $l['folder']; break 2; }
 }
 unset($t);
-foreach ($threads as $sid => $t) $insThread->execute([$sid, $t['url'], $t['topic'], $t['folder'], $t['secs'], $t['first'], $t['last']]);
+// chains.json is the authority on which chain and number a thread has
+foreach ($threads as $sid => &$t) if (isset($chainOf[$sid])) [$t['chain'], $t['chain_n']] = $chainOf[$sid];
+unset($t);
+foreach ($threads as $sid => $t) $insThread->execute([$sid, $t['url'], $t['topic'], $t['folder'], $t['secs'], $t['first'], $t['last'],
+    $t['chain'] ?: null, $t['chain'] ? $t['chain_n'] : null]);
 
 // ---- file tree ----
 [$code, $xml] = dav('PROPFIND', '', ['Depth: infinity']);
@@ -114,7 +135,7 @@ foreach ($xp->query('//d:response') as $r) {
 }
 
 // ---- projects (one per folder) ----
-$insProj = $db->prepare("INSERT OR REPLACE INTO projects VALUES (?,?,?,?,?,?)");
+$insProj = $db->prepare("INSERT OR REPLACE INTO projects (folder,name,business,updated,secs,topic,chain,chain_n) VALUES (?,?,?,?,?,?,?,?)");
 foreach ($folders as $folder => $mod) {
     $th = array_filter($threads, fn($t) => $t['folder'] === $folder);
     $secs = array_sum(array_column($th, 'secs'));
@@ -122,7 +143,10 @@ foreach ($folders as $folder => $mod) {
     $topic = $th ? $th[0]['topic'] : '';
     $name = preg_replace('/-\d{2}-\d{2}-\d{4}-ver[\d.]+-/', ' · ', $folder);
     $name = ucfirst(str_replace('-', ' ', $name));
-    $insProj->execute([$folder, $name, business_of($folder, $topic), $mod, $secs, $topic]);
+    // chain: from the newest thread of this folder that has one, else from chains.json by folder
+    $chained = array_values(array_filter($th, fn($t) => $t['chain'] !== ''));
+    [$chain, $chainN] = $chained ? [$chained[0]['chain'], $chained[0]['chain_n']] : ($chainOfFolder[$folder] ?? [null, null]);
+    $insProj->execute([$folder, $name, business_of($folder, $topic), $mod, $secs, $topic, $chain ?: null, $chain ? $chainN : null]);
 }
 
 // ---- hosting meter ----
